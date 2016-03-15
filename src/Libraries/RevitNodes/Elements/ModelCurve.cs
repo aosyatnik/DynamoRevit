@@ -79,11 +79,13 @@ namespace Revit.Elements
             if (mc != null)
             {
                 InternalSetCurveElement(mc);
-                if (!InternalSetSketchPlaneFromCurve(crv))
+                InternalSetSketchPlaneFromCurve(crv);
+                if (CurveUtils.GetPlaneFromCurve(crv, true) == null)
                 {
                     InternalSetCurve(crv);
-                    return;
                 }
+
+                return;
             }
 
             ElementId oldId = (mc != null) ? mc.Id : ElementId.InvalidElementId;
@@ -134,20 +136,16 @@ namespace Revit.Elements
         #region Private mutators
 
         /// <summary>
-        /// Set the curve internally.  Returns false if this method failed to set the curve
+        /// Set the plane internally.
         /// </summary>
-        /// <param name="c"></param>
-        /// <returns></returns>
-        private bool InternalSetSketchPlaneFromCurve(Autodesk.Revit.DB.Curve c)
+        private void InternalSetSketchPlaneFromCurve(Autodesk.Revit.DB.Curve c)
         {
             TransactionManager.Instance.EnsureInTransaction(Document);
 
             // Infer the sketch plane
             Autodesk.Revit.DB.Plane plane = CurveUtils.GetPlaneFromCurve(c, false);
 
-            // attempt to change the sketch plane
-            bool needsRemake = false;
-            string idSpUnused = resetSketchPlaneMethod(this.InternalCurveElement, c, plane, out needsRemake);
+            string idSpUnused = resetSketchPlaneMethod(this.InternalCurveElement, c, plane);
 
             // if we got a valid id, delete the old sketch plane
             if (idSpUnused != String.Empty)
@@ -156,8 +154,6 @@ namespace Revit.Elements
             }
 
             TransactionManager.Instance.TransactionTaskDone();
-
-            return !needsRemake;
         }
 
         #endregion
@@ -236,13 +232,10 @@ namespace Revit.Elements
 
         private static bool hasMethodResetSketchPlane = true;
 
-        private static string resetSketchPlaneMethod(Autodesk.Revit.DB.CurveElement mc, Curve c, Autodesk.Revit.DB.Plane flattenedOnPlane, out bool needsSketchPlaneReset)
+        private static string resetSketchPlaneMethod(Autodesk.Revit.DB.CurveElement mc, Curve c, Autodesk.Revit.DB.Plane flattenedOnPlane)
         {
-            //do we need to reset?
-            needsSketchPlaneReset = false;
-            Autodesk.Revit.DB.Plane newPlane = flattenedOnPlane != null ? flattenedOnPlane : CurveUtils.GetPlaneFromCurve(c, false);
-
-            Autodesk.Revit.DB.Plane curPlane = mc.SketchPlane.GetPlane();
+            Plane newPlane = flattenedOnPlane != null ? flattenedOnPlane : CurveUtils.GetPlaneFromCurve(c, false);
+            Plane curPlane = mc.SketchPlane.GetPlane();
 
             bool resetPlane = false;
 
@@ -269,41 +262,8 @@ namespace Revit.Elements
                 return (sp == null || mc.SketchPlane.Id == sp.Id) ? "" : sp.UniqueId;
             }
 
-            //do reset if method is available
-
-            bool foundMethod = false;
-
-            if (hasMethodResetSketchPlane)
-            {
-                Type CurveElementType = typeof(Autodesk.Revit.DB.CurveElement);
-                MethodInfo[] curveElementMethods = CurveElementType.GetMethods(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
-                System.String nameOfMethodSetCurve = "ResetSketchPlaneAndCurve";
-                System.String nameOfMethodSetCurveAlt = "SetSketchPlaneAndCurve";
-
-                foreach (MethodInfo m in curveElementMethods)
-                {
-                    if (m.Name == nameOfMethodSetCurve || m.Name == nameOfMethodSetCurveAlt)
-                    {
-                        object[] argsM = new object[2];
-                        sp = GetSketchPlaneFromCurve(c);
-                        argsM[0] = sp;
-                        argsM[1] = null;
-
-                        foundMethod = true;
-                        m.Invoke(mc, argsM);
-                        break;
-                    }
-                }
-            }
-            if (!foundMethod)
-            {
-                //sp = dynRevitUtils.GetSketchPlaneFromCurve(c);
-                hasMethodResetSketchPlane = false;
-                needsSketchPlaneReset = true;
-                //expect exception, so try to keep old plane?
-                //mc.SketchPlane = sp;
-                return "";
-            }
+            sp = GetSketchPlaneFromCurve(c);
+            mc.SetSketchPlaneAndCurve(sp, c);
 
             if (sp != null && mc.SketchPlane.Id != sp.Id)
                 return sp.UniqueId;
